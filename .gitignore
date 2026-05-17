@@ -11,3 +11,4 @@ outputs/*
 !outputs/.gitkeep
 src/generated/*.py
 !src/generated/.gitkeep
+src/__init__.py

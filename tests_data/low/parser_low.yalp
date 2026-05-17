@@ -1,4 +1,6 @@
-%token NUM PLUS
+/* Caso de complejidad baja: suma de números */
+%token NUM PLUS WS
+IGNORE WS
 %%
 expr: expr PLUS term | term ;
 term: NUM ;

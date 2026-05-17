@@ -1,81 +1,202 @@
 """Construcción y simulación de AFD para tokenización."""
-from collections import defaultdict
-from .regex_engine import tokenize_regex, add_concat, to_postfix, thompson, epsilon_closure, EPS
+from collections import defaultdict, deque
+from .regex_engine import EPS, add_concat, all_states, epsilon_closure, thompson, to_postfix, tokenize_regex
+
+
+def _copy_nfa_with_offset(target, source, offset):
+    for src, row in source.items():
+        for symbol, dests in row.items():
+            for dest in dests:
+                target[src + offset][symbol].add(dest + offset)
+
+
+def _normalize_dfa(dfa):
+    """Convierte tablas cargadas desde JSON a enteros cuando haga falta."""
+    trans = {}
+    for state, row in dfa.get('trans', {}).items():
+        state_i = int(state)
+        trans[state_i] = {symbol: int(dest) for symbol, dest in row.items()}
+    accept = {}
+    for state, info in dfa.get('accept', {}).items():
+        state_i = int(state)
+        if isinstance(info, dict):
+            accept[state_i] = {
+                'priority': int(info.get('priority', 0)),
+                'token': info.get('token'),
+                'ignore': bool(info.get('ignore', False)),
+            }
+        else:
+            priority, token, ignore = info
+            accept[state_i] = {'priority': int(priority), 'token': token, 'ignore': bool(ignore)}
+    return {
+        'start': int(dfa.get('start', 0)),
+        'trans': trans,
+        'accept': accept,
+        'ignore_tokens': set(dfa.get('ignore_tokens', [])),
+    }
 
 
 def build_dfa(spec):
+    """Construye un AFD combinado desde todas las reglas léxicas.
+
+    Se usa máximo avance. Si dos reglas aceptan el mismo lexema, gana la regla
+    que apareció primero en el archivo .yal.
+    """
     nfa_trans = defaultdict(lambda: defaultdict(set))
-    start = 0
+    combined_start = 0
     next_state = 1
     accept_info = {}
-    for idx, rule in enumerate(spec.rules):
-        tokens = add_concat(tokenize_regex(rule.regex))
-        (s, e), trans = thompson(to_postfix(tokens))
+
+    for priority, rule in enumerate(spec.rules):
+        regex_tokens = add_concat(tokenize_regex(rule.regex))
+        (start, end), trans = thompson(to_postfix(regex_tokens))
+        states = all_states(trans, start, end)
         offset = next_state
-        for a in trans:
-            for ch, bs in trans[a].items():
-                for b in bs:
-                    nfa_trans[a + offset][ch].add(b + offset)
-        nfa_trans[start][EPS].add(s + offset)
-        accept_info[e + offset] = (idx, rule.token, rule.ignore)
-        next_state = max(next_state, max(trans.keys(), default=0) + offset + 1)
+        _copy_nfa_with_offset(nfa_trans, trans, offset)
+        nfa_trans[combined_start][EPS].add(start + offset)
+        accept_info[end + offset] = {
+            'priority': priority,
+            'token': rule.token,
+            'ignore': rule.ignore,
+        }
+        next_state += max(states) + 1
 
-    alphabet = set()
-    for a in nfa_trans:
-        for ch in nfa_trans[a]:
-            if ch != EPS:
-                alphabet.add(ch)
+    alphabet = sorted(
+        symbol
+        for row in nfa_trans.values()
+        for symbol in row.keys()
+        if symbol != EPS
+    )
 
-    dfa_states = []
-    dfa_map = {}
+    start_set = epsilon_closure({combined_start}, nfa_trans)
+    dfa_states = [start_set]
+    dfa_map = {start_set: 0}
     dfa_trans = {}
-    start_set = epsilon_closure({start}, nfa_trans)
-    dfa_map[start_set] = 0
-    dfa_states.append(start_set)
-    i = 0
-    while i < len(dfa_states):
-        st = dfa_states[i]
-        dfa_trans[i] = {}
-        for ch in alphabet:
-            nxt = set()
-            for n in st:
-                nxt.update(nfa_trans[n].get(ch, set()))
-            if not nxt:
+    queue = deque([start_set])
+
+    while queue:
+        current = queue.popleft()
+        current_id = dfa_map[current]
+        dfa_trans[current_id] = {}
+        for symbol in alphabet:
+            move = set()
+            for nfa_state in current:
+                move.update(nfa_trans[nfa_state].get(symbol, set()))
+            if not move:
                 continue
-            c = epsilon_closure(nxt, nfa_trans)
-            if c not in dfa_map:
-                dfa_map[c] = len(dfa_states)
-                dfa_states.append(c)
-            dfa_trans[i][ch] = dfa_map[c]
-        i += 1
+            closed = epsilon_closure(move, nfa_trans)
+            if closed not in dfa_map:
+                dfa_map[closed] = len(dfa_states)
+                dfa_states.append(closed)
+                queue.append(closed)
+            dfa_trans[current_id][symbol] = dfa_map[closed]
 
     dfa_accept = {}
-    for i, st in enumerate(dfa_states):
-        candidates = [accept_info[s] for s in st if s in accept_info]
+    for dfa_id, nfa_set in enumerate(dfa_states):
+        candidates = [accept_info[state] for state in nfa_set if state in accept_info]
         if candidates:
-            dfa_accept[i] = sorted(candidates, key=lambda x: x[0])[0]
-    return {'trans': dfa_trans, 'accept': dfa_accept, 'start': 0}
+            dfa_accept[dfa_id] = min(candidates, key=lambda item: item['priority'])
+
+    return {
+        'start': 0,
+        'trans': dfa_trans,
+        'accept': dfa_accept,
+        'ignore_tokens': sorted({rule.token for rule in spec.rules if rule.ignore}),
+    }
+
+
+def apply_ignore_tokens(dfa, ignore_tokens):
+    """Marca como ignorados los tokens declarados con IGNORE en YAPar."""
+    dfa = _normalize_dfa(dfa)
+    combined = set(dfa.get('ignore_tokens', set())) | set(ignore_tokens or [])
+    for info in dfa['accept'].values():
+        if info['token'] in combined:
+            info['ignore'] = True
+    dfa['ignore_tokens'] = sorted(combined)
+    return dfa
+
+
+def _position_from_index(text, index):
+    line = 1
+    col = 1
+    for pos, ch in enumerate(text):
+        if pos == index:
+            break
+        if ch == '\n':
+            line += 1
+            col = 1
+        else:
+            col += 1
+    return line, col
 
 
 def tokenize(text, dfa):
+    dfa = _normalize_dfa(dfa)
     i = 0
-    out, errs = [], []
+    out = []
+    errors = []
+
     while i < len(text):
-        state, j = dfa['start'], i
-        last = None
-        while j < len(text) and text[j] in dfa['trans'].get(state, {}):
-            state = dfa['trans'][state][text[j]]
+        state = dfa['start']
+        j = i
+        last_accept = None
+
+        while j < len(text):
+            row = dfa['trans'].get(state, {})
+            ch = text[j]
+            if ch not in row:
+                break
+            state = row[ch]
             j += 1
             if state in dfa['accept']:
-                last = (j, dfa['accept'][state])
-        if last is None:
-            errs.append(f'Error léxico en posición {i}: {repr(text[i])}')
+                last_accept = (j, dfa['accept'][state])
+
+        if last_accept is None:
+            line, col = _position_from_index(text, i)
+            errors.append(f"Error léxico en línea {line}, columna {col}: carácter {text[i]!r}")
             i += 1
             continue
-        end, (_, token, ignore) = last
+
+        end, info = last_accept
         lexeme = text[i:end]
+        ignore = info.get('ignore', False) or info.get('token') in dfa.get('ignore_tokens', set())
         if not ignore:
-            out.append((token, lexeme))
+            out.append((info['token'], lexeme))
         i = end
+
     out.append(('$', '$'))
-    return out, errs
+    return out, errors
+
+
+def dfa_to_text(dfa):
+    dfa = _normalize_dfa(dfa)
+    lines = []
+    lines.append(f"Estado inicial: {dfa['start']}")
+    lines.append('Estados de aceptación:')
+    for state in sorted(dfa['accept']):
+        info = dfa['accept'][state]
+        label = info['token'] + (' [IGNORE]' if info.get('ignore') else '')
+        lines.append(f'  {state}: {label}')
+    lines.append('Transiciones:')
+    for state in sorted(dfa['trans']):
+        for symbol in sorted(dfa['trans'][state]):
+            display = symbol.encode('unicode_escape').decode('ascii')
+            lines.append(f'  {state} -- {display!r} --> {dfa["trans"][state][symbol]}')
+    return '\n'.join(lines) + '\n'
+
+
+def dfa_to_dot(dfa):
+    dfa = _normalize_dfa(dfa)
+    lines = ['digraph DFA {', '  rankdir=LR;', '  node [shape=circle];', '  start [shape=point];', f'  start -> {dfa["start"]};']
+    for state, info in sorted(dfa['accept'].items()):
+        label = f"{state}\\n{info['token']}"
+        if info.get('ignore'):
+            label += '\\nIGNORE'
+        lines.append(f'  {state} [shape=doublecircle, label="{label}"];')
+    for state, row in sorted(dfa['trans'].items()):
+        for symbol, dest in sorted(row.items()):
+            label = symbol.replace('\\', '\\\\').replace('"', '\\"')
+            label = label.encode('unicode_escape').decode('ascii')
+            lines.append(f'  {state} -> {dest} [label="{label}"];')
+    lines.append('}')
+    return '\n'.join(lines) + '\n'

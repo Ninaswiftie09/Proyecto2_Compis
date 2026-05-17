@@ -1,4 +1,6 @@
-%token NUM PLUS MUL LPAREN RPAREN
+/* Caso de complejidad media: expresiones aritméticas con precedencia */
+%token NUM PLUS MUL LPAREN RPAREN WS
+IGNORE WS
 %%
 expr: expr PLUS term | term ;
 term: term MUL factor | factor ;
