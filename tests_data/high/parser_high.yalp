@@ -1,0 +1,5 @@
+%token ID EQ NUM SEMI PLUS
+%%
+stmt: ID EQ expr SEMI ;
+expr: expr PLUS term | term ;
+term: NUM | ID ;
