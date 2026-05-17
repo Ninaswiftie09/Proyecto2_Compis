@@ -12,3 +12,5 @@ outputs/*
 src/generated/*.py
 !src/generated/.gitkeep
 src/__init__.py
+.claude/
+.claude/

@@ -1,5 +1,6 @@
 """Construcción y simulación de AFD para tokenización."""
 from collections import defaultdict, deque
+from .models import normalize_dfa
 from .regex_engine import EPS, add_concat, all_states, epsilon_closure, thompson, to_postfix, tokenize_regex
 
 
@@ -10,37 +11,11 @@ def _copy_nfa_with_offset(target, source, offset):
                 target[src + offset][symbol].add(dest + offset)
 
 
-def _normalize_dfa(dfa):
-    """Convierte tablas cargadas desde JSON a enteros cuando haga falta."""
-    trans = {}
-    for state, row in dfa.get('trans', {}).items():
-        state_i = int(state)
-        trans[state_i] = {symbol: int(dest) for symbol, dest in row.items()}
-    accept = {}
-    for state, info in dfa.get('accept', {}).items():
-        state_i = int(state)
-        if isinstance(info, dict):
-            accept[state_i] = {
-                'priority': int(info.get('priority', 0)),
-                'token': info.get('token'),
-                'ignore': bool(info.get('ignore', False)),
-            }
-        else:
-            priority, token, ignore = info
-            accept[state_i] = {'priority': int(priority), 'token': token, 'ignore': bool(ignore)}
-    return {
-        'start': int(dfa.get('start', 0)),
-        'trans': trans,
-        'accept': accept,
-        'ignore_tokens': set(dfa.get('ignore_tokens', [])),
-    }
-
-
 def build_dfa(spec):
     """Construye un AFD combinado desde todas las reglas léxicas.
 
     Se usa máximo avance. Si dos reglas aceptan el mismo lexema, gana la regla
-    que apareció primero en el archivo .yal.
+    que apareció primero en el archivo .yal (menor priority).
     """
     nfa_trans = defaultdict(lambda: defaultdict(set))
     combined_start = 0
@@ -56,8 +31,8 @@ def build_dfa(spec):
         nfa_trans[combined_start][EPS].add(start + offset)
         accept_info[end + offset] = {
             'priority': priority,
-            'token': rule.token,
-            'ignore': rule.ignore,
+            'token':    rule.token,
+            'ignore':   rule.ignore,
         }
         next_state += max(states) + 1
 
@@ -98,16 +73,16 @@ def build_dfa(spec):
             dfa_accept[dfa_id] = min(candidates, key=lambda item: item['priority'])
 
     return {
-        'start': 0,
-        'trans': dfa_trans,
-        'accept': dfa_accept,
+        'start':        0,
+        'trans':        dfa_trans,
+        'accept':       dfa_accept,
         'ignore_tokens': sorted({rule.token for rule in spec.rules if rule.ignore}),
     }
 
 
 def apply_ignore_tokens(dfa, ignore_tokens):
     """Marca como ignorados los tokens declarados con IGNORE en YAPar."""
-    dfa = _normalize_dfa(dfa)
+    dfa = normalize_dfa(dfa)
     combined = set(dfa.get('ignore_tokens', set())) | set(ignore_tokens or [])
     for info in dfa['accept'].values():
         if info['token'] in combined:
@@ -116,9 +91,10 @@ def apply_ignore_tokens(dfa, ignore_tokens):
     return dfa
 
 
-def _position_from_index(text, index):
-    line = 1
-    col = 1
+def _position_from_index(text: str, index: int):
+    """Calcula (línea, columna) para un índice en el texto.
+    Pre-construye la tabla una sola vez para ser O(n) total."""
+    line, col = 1, 1
     for pos, ch in enumerate(text):
         if pos == index:
             break
@@ -130,8 +106,31 @@ def _position_from_index(text, index):
     return line, col
 
 
-def tokenize(text, dfa):
-    dfa = _normalize_dfa(dfa)
+def _build_line_offsets(text: str):
+    """Devuelve lista de offsets de inicio de cada línea (índice 0 = línea 1)."""
+    offsets = [0]
+    for i, ch in enumerate(text):
+        if ch == '\n' and i + 1 < len(text):
+            offsets.append(i + 1)
+    return offsets
+
+
+def _offset_to_line_col(offsets, index):
+    """Búsqueda binaria sobre offsets para obtener (línea, columna) en O(log n)."""
+    lo, hi = 0, len(offsets) - 1
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if offsets[mid] <= index:
+            lo = mid
+        else:
+            hi = mid - 1
+    return lo + 1, index - offsets[lo] + 1
+
+
+def tokenize(text: str, dfa: dict):
+    """Tokeniza texto usando el DFA dado. Reporta errores léxicos con posición."""
+    dfa = normalize_dfa(dfa)
+    offsets = _build_line_offsets(text)   # O(n) una sola vez
     i = 0
     out = []
     errors = []
@@ -152,8 +151,10 @@ def tokenize(text, dfa):
                 last_accept = (j, dfa['accept'][state])
 
         if last_accept is None:
-            line, col = _position_from_index(text, i)
-            errors.append(f"Error léxico en línea {line}, columna {col}: carácter {text[i]!r}")
+            line, col = _offset_to_line_col(offsets, i)
+            errors.append(
+                f"Error léxico en línea {line}, columna {col}: carácter {text[i]!r}"
+            )
             i += 1
             continue
 
@@ -169,7 +170,7 @@ def tokenize(text, dfa):
 
 
 def dfa_to_text(dfa):
-    dfa = _normalize_dfa(dfa)
+    dfa = normalize_dfa(dfa)
     lines = []
     lines.append(f"Estado inicial: {dfa['start']}")
     lines.append('Estados de aceptación:')
@@ -186,8 +187,14 @@ def dfa_to_text(dfa):
 
 
 def dfa_to_dot(dfa):
-    dfa = _normalize_dfa(dfa)
-    lines = ['digraph DFA {', '  rankdir=LR;', '  node [shape=circle];', '  start [shape=point];', f'  start -> {dfa["start"]};']
+    dfa = normalize_dfa(dfa)
+    lines = [
+        'digraph DFA {',
+        '  rankdir=LR;',
+        '  node [shape=circle];',
+        '  start [shape=point];',
+        f'  start -> {dfa["start"]};',
+    ]
     for state, info in sorted(dfa['accept'].items()):
         label = f"{state}\\n{info['token']}"
         if info.get('ignore'):

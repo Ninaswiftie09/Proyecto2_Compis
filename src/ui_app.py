@@ -29,6 +29,7 @@ class App(tk.Tk):
         self.configure(bg=COLORS['bg'])
         self.paths = {}
         self.last_result = None
+        self._photos = {}
         self._configure_style()
         self._build()
 
@@ -135,8 +136,8 @@ class App(tk.Tk):
         self.trace_tree = self._tree_tab('Traza SLR', ('Pila', 'Entrada', 'Acción'))
         self.errors_text = self._text_tab('Errores')
         self.files_text = self._text_tab('Archivos generados')
-        self.dfa_text = self._text_tab('AFD')
-        self.lr0_text = self._text_tab('LR(0)')
+        self.dfa_canvas, self.dfa_text = self._combo_tab('AFD')
+        self.lr0_canvas, self.lr0_text = self._combo_tab('LR(0)')
         self.table_text = self._text_tab('Tabla SLR')
 
     def _tree_tab(self, title, columns):
@@ -168,6 +169,55 @@ class App(tk.Tk):
         text.configure(yscrollcommand=ybar.set, xscrollcommand=xbar.set)
         return text
 
+    def _combo_tab(self, title):
+        """Tab con canvas scrollable para imagen (arriba) y texto (abajo)."""
+        frame = ttk.Frame(self.notebook)
+        self.notebook.add(frame, text=title)
+        frame.rowconfigure(0, weight=3)
+        frame.rowconfigure(1, weight=1)
+        frame.columnconfigure(0, weight=1)
+
+        img_frame = tk.Frame(frame, bg='#0f172a')
+        img_frame.grid(row=0, column=0, sticky='nsew')
+        img_frame.rowconfigure(0, weight=1)
+        img_frame.columnconfigure(0, weight=1)
+        canvas = tk.Canvas(img_frame, bg='#0f172a', highlightthickness=0)
+        canvas.grid(row=0, column=0, sticky='nsew')
+        cy = ttk.Scrollbar(img_frame, orient='vertical', command=canvas.yview)
+        cy.grid(row=0, column=1, sticky='ns')
+        cx = ttk.Scrollbar(img_frame, orient='horizontal', command=canvas.xview)
+        cx.grid(row=1, column=0, sticky='ew')
+        canvas.configure(yscrollcommand=cy.set, xscrollcommand=cx.set)
+
+        txt_frame = tk.Frame(frame, bg='#0f172a')
+        txt_frame.grid(row=1, column=0, sticky='nsew')
+        txt_frame.rowconfigure(0, weight=1)
+        txt_frame.columnconfigure(0, weight=1)
+        text = tk.Text(txt_frame, bg='#0f172a', fg=COLORS['text'], insertbackground=COLORS['text'],
+                       relief='flat', wrap='none', font=('Consolas', 9), height=8)
+        text.grid(row=0, column=0, sticky='nsew')
+        ybar = ttk.Scrollbar(txt_frame, orient='vertical', command=text.yview)
+        ybar.grid(row=0, column=1, sticky='ns')
+        text.configure(yscrollcommand=ybar.set)
+        return canvas, text
+
+    def _show_image(self, canvas, png_path):
+        """Carga un PNG en el canvas; muestra mensaje si no está disponible."""
+        canvas.delete('all')
+        if png_path and os.path.exists(png_path):
+            try:
+                img = tk.PhotoImage(file=png_path)
+                key = str(id(canvas))
+                self._photos[key] = img
+                canvas.create_image(0, 0, anchor='nw', image=img)
+                canvas.configure(scrollregion=canvas.bbox('all'))
+                return
+            except Exception:
+                pass
+        msg = 'Imagen no disponible. Instala Graphviz para generar el diagrama visual.'
+        canvas.create_text(12, 12, text=msg, fill=COLORS['muted'], anchor='nw',
+                           font=('Segoe UI', 10))
+
     def pick(self, key):
         if key == 'out':
             selected = filedialog.askdirectory(title='Selecciona carpeta de salida')
@@ -197,6 +247,9 @@ class App(tk.Tk):
                 tree.delete(item)
         for text in [self.errors_text, self.files_text, self.dfa_text, self.lr0_text, self.table_text]:
             text.delete('1.0', tk.END)
+        for canvas in [self.dfa_canvas, self.lr0_canvas]:
+            canvas.delete('all')
+        self._photos.clear()
         self.badge.config(text='SIN EJECUTAR', bg=COLORS['panel2'], fg=COLORS['muted'])
         self.status.config(text='Resultados limpiados.', fg=COLORS['muted'])
 
@@ -252,6 +305,8 @@ class App(tk.Tk):
         for name, path in files.items():
             file_lines.append(f'{name}: {path or "No generado"}')
         self.files_text.insert(tk.END, '\n'.join(file_lines))
+        self._show_image(self.dfa_canvas, files.get('dfa_png'))
         self.dfa_text.insert(tk.END, self._read_file_if_exists(files.get('dfa_txt')))
+        self._show_image(self.lr0_canvas, files.get('lr0_png'))
         self.lr0_text.insert(tk.END, self._read_file_if_exists(files.get('lr0_txt')))
         self.table_text.insert(tk.END, self._read_file_if_exists(files.get('slr_table')))

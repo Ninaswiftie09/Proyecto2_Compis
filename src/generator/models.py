@@ -42,3 +42,35 @@ class Item:
 
     def advance(self) -> 'Item':
         return Item(self.lhs, self.rhs, self.dot + 1)
+
+
+def normalize_dfa(dfa: dict) -> dict:
+    """Convierte un DFA (posiblemente cargado desde JSON con claves string)
+    a un dict con claves enteras. Centralizado aquí para evitar duplicación
+    entre lexer_builder.py y codegen.py."""
+    trans: Dict[int, Dict[str, int]] = {}
+    for state, row in dfa.get('trans', {}).items():
+        trans[int(state)] = {symbol: int(dest) for symbol, dest in row.items()}
+
+    accept: Dict[int, dict] = {}
+    for state, info in dfa.get('accept', {}).items():
+        if isinstance(info, dict):
+            accept[int(state)] = {
+                'priority': int(info.get('priority', 0)),
+                'token':    info.get('token'),
+                'ignore':   bool(info.get('ignore', False)),
+            }
+        else:
+            priority, token, ignore = info
+            accept[int(state)] = {
+                'priority': int(priority),
+                'token':    token,
+                'ignore':   bool(ignore),
+            }
+
+    return {
+        'start':        int(dfa.get('start', 0)),
+        'trans':        trans,
+        'accept':       accept,
+        'ignore_tokens': set(dfa.get('ignore_tokens', [])),
+    }
