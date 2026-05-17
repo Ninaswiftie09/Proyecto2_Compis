@@ -1,8 +1,5 @@
 """Motor de expresiones regulares propio basado en Thompson.
 
-No utiliza librerías de expresiones regulares. Soporta un subconjunto útil para
-YALex: concatenación implícita, unión |, *, +, ?, paréntesis, escapes comunes,
-clases de caracteres [a-zA-Z0-9_], y espacios escapados.
 """
 from collections import defaultdict, deque
 
@@ -26,12 +23,93 @@ def _escape_value(ch: str) -> str:
     return values.get(ch, ch)
 
 
-def _expand_class(pattern: str, start: int):
-    """Lee una clase [..] y devuelve tokens equivalentes a (a|b|c)."""
+def _read_quoted_literal(pattern: str, start: int):
+    """Lee un literal entre comillas simples.
+
+    Ejemplos válidos:
+      '+'      -> ['+']
+      '\\n'    -> ['\n']
+      'abc'    -> ['a', 'b', 'c']
+
+    Devuelve una lista de caracteres y el índice justo después de la comilla
+    de cierre. No usa expresiones regulares.
+    """
+    if start >= len(pattern) or pattern[start] != "'":
+        raise ValueError('Se esperaba una comilla simple al leer literal YALex.')
+
     chars = []
     i = start + 1
+    while i < len(pattern):
+        ch = pattern[i]
+        if ch == "'":
+            if not chars:
+                raise ValueError("Literal vacío '' en expresión regular.")
+            return chars, i + 1
+        if ch == '\\':
+            if i + 1 >= len(pattern):
+                raise ValueError('Escape incompleto dentro de literal entre comillas simples.')
+            chars.append(_escape_value(pattern[i + 1]))
+            i += 2
+        else:
+            chars.append(ch)
+            i += 1
+
+    raise ValueError('Literal entre comillas simples sin cerrar en expresión regular.')
+
+
+def _class_contains_quoted_items(pattern: str, start: int) -> bool:
+    """Indica si una clase [...] contiene elementos entre comillas simples."""
+    i = start + 1
+    while i < len(pattern):
+        if pattern[i] == '\\':
+            i += 2
+            continue
+        if pattern[i] == ']':
+            return False
+        if pattern[i] == "'":
+            return True
+        i += 1
+    return False
+
+
+def _read_class_atom(pattern: str, i: int):
+    """Lee un elemento dentro de una clase de caracteres.
+
+    Puede leer:
+      a
+      \\n
+      '\\n'
+      '0'
+    """
+    if i >= len(pattern):
+        raise ValueError('Clase de caracteres sin cerrar en expresión regular.')
+
+    if pattern[i] == "'":
+        return _read_quoted_literal(pattern, i)
+
+    if pattern[i] == '\\':
+        if i + 1 >= len(pattern):
+            raise ValueError('Escape incompleto dentro de clase de caracteres.')
+        return [_escape_value(pattern[i + 1])], i + 2
+
+    return [pattern[i]], i + 1
+
+
+def _expand_class(pattern: str, start: int):
+    """Lee una clase [..] y devuelve tokens equivalentes a (a|b|c).
+
+    Soporta los dos estilos:
+      [0-9]
+      ['0'-'9']
+      [' ' '\\t' '\\n']
+    """
+    chars = []
+    i = start + 1
+    quoted_style = _class_contains_quoted_items(pattern, start)
+
     if i < len(pattern) and pattern[i] == '^':
         raise ValueError('Las clases negadas [^...] no están soportadas por este generador.')
+
     while i < len(pattern):
         if pattern[i] == ']':
             if not chars:
@@ -43,22 +121,31 @@ def _expand_class(pattern: str, start: int):
                 toks.append(_literal(ch))
             toks.append(')')
             return toks, i + 1
-        if pattern[i] == '\\':
-            if i + 1 >= len(pattern):
-                raise ValueError('Escape incompleto dentro de clase de caracteres.')
-            chars.append(_escape_value(pattern[i + 1]))
-            i += 2
+
+        # En clases estilo ['a' 'b' '\\n'], los espacios entre elementos son
+        # separadores. El espacio literal se escribe como ' '.
+        if quoted_style and pattern[i].isspace():
+            i += 1
             continue
-        if i + 2 < len(pattern) and pattern[i + 1] == '-' and pattern[i + 2] != ']':
-            a, b = pattern[i], pattern[i + 2]
+
+        left_chars, next_i = _read_class_atom(pattern, i)
+
+        # Rango: a-z o 'a'-'z'. Solo se permite cuando cada lado es un carácter.
+        if next_i < len(pattern) and pattern[next_i] == '-' and next_i + 1 < len(pattern) and pattern[next_i + 1] != ']':
+            right_chars, after_right = _read_class_atom(pattern, next_i + 1)
+            if len(left_chars) != 1 or len(right_chars) != 1:
+                raise ValueError('Los rangos dentro de clases deben usar un carácter por lado.')
+            a, b = left_chars[0], right_chars[0]
             if ord(a) > ord(b):
                 raise ValueError(f'Rango inválido [{a}-{b}] en expresión regular.')
             for code in range(ord(a), ord(b) + 1):
                 chars.append(chr(code))
-            i += 3
+            i = after_right
             continue
-        chars.append(pattern[i])
-        i += 1
+
+        chars.extend(left_chars)
+        i = next_i
+
     raise ValueError('Clase de caracteres sin cerrar en expresión regular.')
 
 
@@ -75,6 +162,10 @@ def tokenize_regex(pattern: str):
                 raise ValueError('Escape incompleto al final de expresión regular.')
             tokens.append(_literal(_escape_value(pattern[i + 1])))
             i += 2
+        elif c == "'":
+            literal_chars, i = _read_quoted_literal(pattern, i)
+            for ch in literal_chars:
+                tokens.append(_literal(ch))
         elif c == '[':
             class_tokens, i = _expand_class(pattern, i)
             tokens.extend(class_tokens)

@@ -55,10 +55,7 @@ def run(yal, yalp, input_file, out_dir):
 
     text = open(input_file, 'r', encoding='utf-8').read()
     tokens, lex_errors = tokenize(text, dfa)
-    if lex_errors:
-        trace, syn_error = [], 'No se ejecutó el parser porque existen errores léxicos.'
-    else:
-        trace, syn_error = parse_tokens(tokens, action, goto)
+    trace, syn_error = parse_tokens(tokens, action, goto)
 
     lexer_path = os.path.join(out_dir, 'generated_lexer.py')
     parser_path = os.path.join(out_dir, 'generated_parser.py')

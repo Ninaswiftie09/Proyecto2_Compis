@@ -10,6 +10,84 @@ def _copy_nfa_with_offset(target, source, offset):
             for dest in dests:
                 target[src + offset][symbol].add(dest + offset)
 
+def _accept_key(info):
+    if not info:
+        return None
+    return (info.get('priority'), info.get('token'), bool(info.get('ignore')))
+
+
+def _minimize_dfa(dfa_trans, dfa_accept, start, alphabet):
+    """Minimiza el AFD sin cambiar el comportamiento del lexer.
+
+    Esto evita diagramas enormes cuando una clase como [0-9] o [a-zA-Z]
+    produce muchos estados equivalentes durante la construcción de Thompson.
+    Las transiciones faltantes se tratan como ausencia de movimiento, igual que
+    en la función tokenize.
+    """
+    states = {start}
+    states.update(dfa_trans.keys())
+    states.update(dfa_accept.keys())
+    for row in dfa_trans.values():
+        states.update(row.values())
+
+    groups = defaultdict(set)
+    for state in states:
+        groups[_accept_key(dfa_accept.get(state))].add(state)
+    partitions = [group for group in groups.values() if group]
+
+    while True:
+        state_to_part = {}
+        for idx, part in enumerate(partitions):
+            for state in part:
+                state_to_part[state] = idx
+
+        refined = []
+        for part in partitions:
+            buckets = defaultdict(set)
+            for state in part:
+                row = dfa_trans.get(state, {})
+                signature = (
+                    _accept_key(dfa_accept.get(state)),
+                    tuple(
+                        state_to_part.get(row[symbol]) if symbol in row else None
+                        for symbol in alphabet
+                    ),
+                )
+                buckets[signature].add(state)
+            refined.extend(buckets.values())
+
+        if len(refined) == len(partitions):
+            partitions = refined
+            break
+        partitions = refined
+
+    # Mantener el estado inicial como 0 para no cambiar supuestos del resto del código.
+    start_part = next(idx for idx, part in enumerate(partitions) if start in part)
+    ordered_parts = [partitions[start_part]] + [
+        part for idx, part in enumerate(partitions) if idx != start_part
+    ]
+
+    old_to_new = {}
+    for new_id, part in enumerate(ordered_parts):
+        for old_id in part:
+            old_to_new[old_id] = new_id
+
+    new_trans = {}
+    for old_state, row in dfa_trans.items():
+        new_state = old_to_new[old_state]
+        new_trans.setdefault(new_state, {})
+        for symbol, old_dest in row.items():
+            new_trans[new_state][symbol] = old_to_new[old_dest]
+
+    # Asegurar que todos los estados minimizados existan aunque no tengan salidas.
+    for new_id in range(len(ordered_parts)):
+        new_trans.setdefault(new_id, {})
+
+    new_accept = {}
+    for old_state, info in dfa_accept.items():
+        new_accept[old_to_new[old_state]] = dict(info)
+
+    return new_trans, new_accept
 
 def build_dfa(spec):
     """Construye un AFD combinado desde todas las reglas léxicas.
@@ -53,17 +131,22 @@ def build_dfa(spec):
         current = queue.popleft()
         current_id = dfa_map[current]
         dfa_trans[current_id] = {}
+
         for symbol in alphabet:
             move = set()
             for nfa_state in current:
                 move.update(nfa_trans[nfa_state].get(symbol, set()))
+
             if not move:
                 continue
+
             closed = epsilon_closure(move, nfa_trans)
+
             if closed not in dfa_map:
                 dfa_map[closed] = len(dfa_states)
                 dfa_states.append(closed)
                 queue.append(closed)
+
             dfa_trans[current_id][symbol] = dfa_map[closed]
 
     dfa_accept = {}
@@ -71,6 +154,8 @@ def build_dfa(spec):
         candidates = [accept_info[state] for state in nfa_set if state in accept_info]
         if candidates:
             dfa_accept[dfa_id] = min(candidates, key=lambda item: item['priority'])
+
+    dfa_trans, dfa_accept = _minimize_dfa(dfa_trans, dfa_accept, 0, alphabet)
 
     return {
         'start':        0,
@@ -186,6 +271,56 @@ def dfa_to_text(dfa):
     return '\n'.join(lines) + '\n'
 
 
+def _display_symbol(symbol: str) -> str:
+    """Convierte un carácter a una etiqueta legible para Graphviz."""
+    names = {
+        '\n': r'\n',
+        '\t': r'\t',
+        '\r': r'\r',
+        ' ': 'space',
+        '"': r'\"',
+        '\\': r'\\',
+    }
+    return names.get(symbol, symbol.encode('unicode_escape').decode('ascii'))
+
+
+def _compress_symbols(symbols):
+    """Agrupa caracteres consecutivos para reducir aristas en el .dot.
+
+    Ejemplo: a,b,c,d -> a-d.
+    Los caracteres no imprimibles se muestran con escape unicode.
+    """
+    if not symbols:
+        return ''
+
+    ordered = sorted(set(symbols), key=lambda ch: ord(ch))
+    ranges = []
+    start = prev = ordered[0]
+
+    for ch in ordered[1:]:
+        if ord(ch) == ord(prev) + 1:
+            prev = ch
+        else:
+            ranges.append((start, prev))
+            start = prev = ch
+    ranges.append((start, prev))
+
+    parts = []
+    for a, b in ranges:
+        if a == b:
+            parts.append(_display_symbol(a))
+        elif ord(b) == ord(a) + 1:
+            parts.append(_display_symbol(a))
+            parts.append(_display_symbol(b))
+        else:
+            parts.append(f'{_display_symbol(a)}-{_display_symbol(b)}')
+    return ', '.join(parts)
+
+
+def _dot_escape(label: str) -> str:
+    return label.replace('\\', '\\\\').replace('"', '\\"')
+
+
 def dfa_to_dot(dfa):
     dfa = normalize_dfa(dfa)
     lines = [
@@ -195,15 +330,20 @@ def dfa_to_dot(dfa):
         '  start [shape=point];',
         f'  start -> {dfa["start"]};',
     ]
+
     for state, info in sorted(dfa['accept'].items()):
         label = f"{state}\\n{info['token']}"
         if info.get('ignore'):
             label += '\\nIGNORE'
         lines.append(f'  {state} [shape=doublecircle, label="{label}"];')
+
     for state, row in sorted(dfa['trans'].items()):
-        for symbol, dest in sorted(row.items()):
-            label = symbol.replace('\\', '\\\\').replace('"', '\\"')
-            label = label.encode('unicode_escape').decode('ascii')
+        grouped = defaultdict(list)
+        for symbol, dest in row.items():
+            grouped[dest].append(symbol)
+        for dest, symbols in sorted(grouped.items()):
+            label = _dot_escape(_compress_symbols(symbols))
             lines.append(f'  {state} -> {dest} [label="{label}"];')
+
     lines.append('}')
     return '\n'.join(lines) + '\n'
