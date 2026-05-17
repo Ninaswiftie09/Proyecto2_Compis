@@ -1,0 +1,5 @@
+%token NUM PLUS MUL LPAREN RPAREN
+%%
+expr: expr PLUS term | term ;
+term: term MUL factor | factor ;
+factor: LPAREN expr RPAREN | NUM ;
