@@ -33,17 +33,15 @@ Proyecto2_Compis/
 │   ├── main.py
 │   ├── ui_app.py
 │   ├── generator/
-│   │   ├── __init__.py
-│   │   ├── models.py
-│   │   ├── yalex_parser.py
-│   │   ├── regex_engine.py
-│   │   ├── lexer_builder.py
-│   │   ├── yalp_parser.py
-│   │   ├── grammar_tools.py
-│   │   ├── slr_builder.py
-│   │   ├── codegen.py
-│   │   └── pipeline.py
-│   └── generated/
+│       ├── __init__.py
+│       ├── models.py
+│       ├── yalex_parser.py
+│       ├── regex_engine.py
+│       ├── yalp_parser.py
+│       ├── grammar_tools.py
+│       ├── slr_builder.py
+│       ├── codegen.py
+│       └── pipeline.py
 ├── tests_data/
 │   ├── low/
 │   │   ├── lexer_low.yal
