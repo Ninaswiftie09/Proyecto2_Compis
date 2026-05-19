@@ -7,7 +7,7 @@ from .models import ENDMARK, Item
 def _sorted_items(items):
     return sorted(items, key=lambda it: (it.lhs, it.rhs, it.dot))
 
-
+# calcula la cerradura de un conjunto de items LR(0)
 def closure(items, grammar):
     result = set(items)
     changed = True
@@ -23,12 +23,12 @@ def closure(items, grammar):
                         changed = True
     return frozenset(result)
 
-
+# calcula a que estado se llega al avanzar con cierto simbolo (sirve para contruir las transiciones del automata LR(0))
 def goto(items, symbol, grammar):
     advanced = [item.advance() for item in items if item.next_symbol() == symbol]
     return closure(advanced, grammar) if advanced else frozenset()
 
-
+# inserta una accion en la tabla action y detecta conflictos SLR
 def _set_action(action_table, state, terminal, value, conflicts):
     current = action_table.setdefault(state, {}).get(terminal)
     if current is not None and current != value:
@@ -37,7 +37,7 @@ def _set_action(action_table, state, terminal, value, conflicts):
         return
     action_table[state][terminal] = value
 
-
+# aumenta la gramatica 
 def _augment_grammar(grammar):
     g = deepcopy(grammar)
     aug = g.start_symbol + "'"
@@ -48,7 +48,7 @@ def _augment_grammar(grammar):
     g.start_symbol = aug
     return g, aug
 
-
+# construye todo lo necesario para el parser SLR
 def build_slr(grammar):
     """Retorna C, transiciones, ACTION, GOTO, conflictos y gramática aumentada."""
     augmented, augmented_start = _augment_grammar(grammar)
@@ -108,7 +108,7 @@ def _format_input(tokens, index):
 def _expected_tokens(action, state):
     return sorted(action.get(state, {}).keys())
 
-
+#  ejecura el parser slr, usa una pila de estados y una lista de tokens, devuelve una traza de la ejecución y un mensaje de error si ocurre un error sintáctico
 def parse_tokens(tokens, action, go):
     """Ejecuta análisis SLR sobre tokens [(TOKEN, lexema), ...]."""
     if not tokens or tokens[-1][0] != ENDMARK:
@@ -166,7 +166,7 @@ def parse_tokens(tokens, action, go):
         else:
             return trace, f'Acción desconocida en tabla ACTION: {act}'
 
-
+#  convierte el automata LR(0) a texto 
 def lr0_to_text(collection, transitions):
     lines = []
     for idx, state_items in enumerate(collection):
@@ -182,7 +182,7 @@ def lr0_to_text(collection, transitions):
         lines.append('')
     return '\n'.join(lines)
 
-
+# genea el .dot
 def lr0_to_dot(collection, transitions):
     lines = ['digraph LR0 {', '  rankdir=LR;', '  node [shape=box, fontname="Courier"];']
     for idx, state_items in enumerate(collection):
@@ -203,7 +203,7 @@ def lr0_to_dot(collection, transitions):
     lines.append('}')
     return '\n'.join(lines) + '\n'
 
-
+# genera la tabla slr en texto
 def table_to_text(action, go):
     action_terms = sorted({term for row in action.values() for term in row})
     goto_terms = sorted({nt for row in go.values() for nt in row})

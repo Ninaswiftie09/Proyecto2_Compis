@@ -2,10 +2,11 @@
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Tuple
 
-EPSILON = 'ε'
-ENDMARK = '$'
+EPSILON = 'ε'# cadena vacía y el inicio de la entrada
+ENDMARK = '$' # fin de la entrada
 
 
+# Es una regla lexica que se saca del yal
 @dataclass
 class LexRule:
     token: str
@@ -13,14 +14,14 @@ class LexRule:
     ignore: bool = False
     source_line: int = 0
 
-
+# guarda las especificaciones lexicas 
 @dataclass
 class YalSpec:
     rules: List[LexRule]
-    definitions: Dict[str, str] = field(default_factory=dict)
+    definitions: Dict[str, str] = field(default_factory=dict) # definiciones let
     warnings: List[str] = field(default_factory=list)
 
-
+# guarda la gramatica que esta en el yalp
 @dataclass
 class Grammar:
     terminals: Set[str]
@@ -31,22 +32,24 @@ class Grammar:
     warnings: List[str] = field(default_factory=list)
 
 
+# representa un item LR(0)
 @dataclass(frozen=True, order=True)
 class Item:
     lhs: str
     rhs: Tuple[str, ...]
-    dot: int
+    dot: int # indica en que posicion va el parser
 
+    # devuelve el simbolo después del punto
     def next_symbol(self) -> Optional[str]:
         return self.rhs[self.dot] if self.dot < len(self.rhs) else None
 
+    # mueve el punto de posición hacia adeltante
     def advance(self) -> 'Item':
         return Item(self.lhs, self.rhs, self.dot + 1)
 
-
+# normaliza el AFD para que las claves de estados sean enteros.
 def normalize_dfa(dfa: dict) -> dict:
-    """Convierte un DFA (posiblemente cargado desde JSON con claves string)
-    a un dict con claves enteras. Centralizado aquí para evitar duplicación
+    """Convierte un DFA a un dict con claves enteras. Centralizado aquí para evitar duplicación
     entre lexer_builder.py y codegen.py."""
     trans: Dict[int, Dict[str, int]] = {}
     for state, row in dfa.get('trans', {}).items():

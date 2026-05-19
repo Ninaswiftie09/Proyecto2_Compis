@@ -5,7 +5,7 @@ GENERATED_HEADER = '''# Archivo generado automáticamente por el sistema.
 
 '''
 
-
+# crea el generated_lexer.py con el DFA y el código para ejecutar el lexer usando ese DFA
 def write_generated_lexer(path, dfa):
     with open(path, 'w', encoding='utf-8') as f:
         f.write(GENERATED_HEADER)
@@ -47,14 +47,9 @@ def _position_from_index(text, index):
             col += 1
     return line, col
 
-
+# Produce tokens uno por uno 
 def tokenize_stream(text):
     """Generador que produce tokens uno a la vez desde el texto de entrada.
-
-    Yields:
-        ('LEX_ERROR', mensaje)  cuando hay un carácter no reconocido.
-        (token, lexema)         para cada token reconocido (no ignorado).
-        ('$', '$')              al final del texto.
     """
     dfa = _normalize_dfa(DFA)
     i = 0
@@ -98,7 +93,7 @@ def tokenize(text):
     return tokens, errors
 ''')
 
-
+# crea el generaded_parser.py con la tabla ACTION y GOTO y el código para ejecutar el parser SLR usando esas tablas
 def write_generated_parser(path, action, goto):
     with open(path, 'w', encoding='utf-8') as f:
         f.write(GENERATED_HEADER)
@@ -185,7 +180,7 @@ def parse(token_stream):
             return trace, lex_errors, f'Acción desconocida en tabla ACTION: {act}'
 ''')
 
-
+# crea el run_generated.py, conecta el lexer generado al parser generado 
 def write_generated_driver(path):
     with open(path, 'w', encoding='utf-8') as f:
         f.write(GENERATED_HEADER)

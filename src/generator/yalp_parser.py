@@ -1,7 +1,7 @@
 """Parser de YAPar con sección de tokens, IGNORE y producciones."""
 from .models import EPSILON, Grammar
 
-
+# elimina comentarios del archvio yalp
 def _strip_comments(text: str) -> str:
     out = []
     i = 0
@@ -18,7 +18,7 @@ def _strip_comments(text: str) -> str:
             i += 1
     return ''.join(out)
 
-
+# determina si un simbolo parece token (mayusculas y al menos una letra)
 def _is_token_name(symbol: str) -> bool:
     return symbol == symbol.upper() and any(ch.isalpha() for ch in symbol)
 

@@ -1,20 +1,9 @@
 """Parser para especificaciones YALex simplificadas y estilo Yacc/YALex.
-
-Formatos aceptados:
-1. Simplificado para el proyecto:
-   TOKEN NUM [0-9]+
-   IGNORE WS [ \t\n]+
-2. Definiciones tipo YALex:
-   let digit = [0-9]
-   rule tokens = parse
-     | digit+ { return NUM }
-     | [' ' '\t' '\n']+ { return WS }
-
-La lectura se hace sin usar librerías de expresiones regulares.
+    Lee el .yal y lo convierte en una lista de reglas léxicas.
 """
 from .models import LexRule, YalSpec
 
-
+# elimina comentarios del archvio yal
 def _strip_comments(text: str) -> str:
     out = []
     i = 0
@@ -37,7 +26,7 @@ def _strip_comments(text: str) -> str:
             i += 1
     return ''.join(out)
 
-
+# detecta si una linea empieza con una palabra clave (let, TOKEN, IGNORE) y vevuelve el resto
 def _split_once_keyword(line: str, keyword: str):
     low = line.lower()
     key = keyword.lower()
@@ -47,9 +36,8 @@ def _split_once_keyword(line: str, keyword: str):
         return None
     return line[len(keyword):].strip()
 
-
+# extrae los tokens de una acción 
 def _parse_action_token(action: str):
-    """Extrae el token desde una acción { return TOKEN } o { TOKEN }."""
     clean = action.strip()
     for ch in '{}();':
         clean = clean.replace(ch, ' ')
@@ -69,7 +57,7 @@ def _parse_action_token(action: str):
         return value.upper(), True
     return value, False
 
-
+# lee linas estilo yalex y extrae token, regex y si es ignore
 def _extract_rule_line(line: str):
     """Extrae regex y acción de una línea tipo | regex { return TOKEN }."""
     s = line.strip()
@@ -87,7 +75,7 @@ def _extract_rule_line(line: str):
         return None
     return token, regex, ignore
 
-
+# reemplaza definiciones declaradas con let
 def _replace_definitions(regex: str, definitions: dict) -> str:
     """Reemplaza nombres definidos con let por su regex entre paréntesis."""
     if not definitions:
@@ -118,18 +106,21 @@ def _replace_definitions(regex: str, definitions: dict) -> str:
             i += 1
     return ''.join(result)
 
-
+# función principal para parsear un archivo yalex y devolver un YalSpec
 def parse_yalex(path: str) -> YalSpec:
+    # lee el archivo y elimina comentarios
     text = _strip_comments(open(path, 'r', encoding='utf-8').read())
     rules = []
     definitions = {}
     warnings = []
 
+    # recorre cada linea y guarda por si hay errores
     for line_no, raw in enumerate(text.splitlines(), start=1):
         line = raw.strip()
         if not line:
             continue
-
+        
+        # detecta definiciones let y las guarda en el diccionario de definiciones
         let_body = _split_once_keyword(line, 'let')
         if let_body and '=' in let_body:
             name, value = let_body.split('=', 1)
@@ -139,7 +130,8 @@ def parse_yalex(path: str) -> YalSpec:
                 raise ValueError(f'Línea {line_no}: definición let sin nombre.')
             definitions[name] = _replace_definitions(value, definitions)
             continue
-
+        
+        # detecta reglas token y las guarda como reglas léxicas
         token_body = _split_once_keyword(line, 'TOKEN')
         if token_body:
             parts = token_body.split(None, 1)
@@ -148,7 +140,8 @@ def parse_yalex(path: str) -> YalSpec:
             token, regex = parts[0], parts[1]
             rules.append(LexRule(token, _replace_definitions(regex, definitions), False, line_no))
             continue
-
+        
+        # detecta reglas ignore y las guarda como reglas léxicas con ignore=True
         ignore_body = _split_once_keyword(line, 'IGNORE')
         if ignore_body:
             parts = ignore_body.split(None, 1)
@@ -159,20 +152,24 @@ def parse_yalex(path: str) -> YalSpec:
             rules.append(LexRule(token, _replace_definitions(regex, definitions), True, line_no))
             continue
 
+        # detecta reglas estilo YALex/Yacc
         yacc_rule = _extract_rule_line(line)
         if yacc_rule:
             token, regex, ignore = yacc_rule
             rules.append(LexRule(token, _replace_definitions(regex, definitions), ignore, line_no))
             continue
-
+        
+        # ignora lineas estructurales del archivo 
         if line.lower().startswith('rule ') or line.lower() in {'{', '}'}:
             continue
 
         warnings.append(f'Línea {line_no} ignorada por el parser YALex: {line}')
 
+    # validacion de que si haya reglas validas 
     if not rules:
         raise ValueError('No se encontraron reglas léxicas válidas en el archivo .yal')
 
+    # revision de tokens duplicados y tokens sin nombre
     seen = set()
     for rule in rules:
         if not rule.token:

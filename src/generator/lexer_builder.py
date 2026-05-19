@@ -15,14 +15,9 @@ def _accept_key(info):
         return None
     return (info.get('priority'), info.get('token'), bool(info.get('ignore')))
 
-
+# reduce el numero de estados del AFD
 def _minimize_dfa(dfa_trans, dfa_accept, start, alphabet):
     """Minimiza el AFD sin cambiar el comportamiento del lexer.
-
-    Esto evita diagramas enormes cuando una clase como [0-9] o [a-zA-Z]
-    produce muchos estados equivalentes durante la construcción de Thompson.
-    Las transiciones faltantes se tratan como ausencia de movimiento, igual que
-    en la función tokenize.
     """
     states = {start}
     states.update(dfa_trans.keys())
@@ -93,7 +88,7 @@ def build_dfa(spec):
     """Construye un AFD combinado desde todas las reglas léxicas.
 
     Se usa máximo avance. Si dos reglas aceptan el mismo lexema, gana la regla
-    que apareció primero en el archivo .yal (menor priority).
+    que apareció primero en el archivo .yal.
     """
     nfa_trans = defaultdict(lambda: defaultdict(set))
     combined_start = 0
@@ -164,7 +159,7 @@ def build_dfa(spec):
         'ignore_tokens': sorted({rule.token for rule in spec.rules if rule.ignore}),
     }
 
-
+# marca tokens como ignorados y no se mandan al parser
 def apply_ignore_tokens(dfa, ignore_tokens):
     """Marca como ignorados los tokens declarados con IGNORE en YAPar."""
     dfa = normalize_dfa(dfa)
@@ -211,7 +206,7 @@ def _offset_to_line_col(offsets, index):
             hi = mid - 1
     return lo + 1, index - offsets[lo] + 1
 
-
+# usa el AFD para convertir el texto de entrada en tokens
 def tokenize(text: str, dfa: dict):
     """Tokeniza texto usando el DFA dado. Reporta errores léxicos con posición."""
     dfa = normalize_dfa(dfa)
@@ -253,7 +248,7 @@ def tokenize(text: str, dfa: dict):
     out.append(('$', '$'))
     return out, errors
 
-
+# genera una representación textual del AFD 
 def dfa_to_text(dfa):
     dfa = normalize_dfa(dfa)
     lines = []
@@ -286,9 +281,6 @@ def _display_symbol(symbol: str) -> str:
 
 def _compress_symbols(symbols):
     """Agrupa caracteres consecutivos para reducir aristas en el .dot.
-
-    Ejemplo: a,b,c,d -> a-d.
-    Los caracteres no imprimibles se muestran con escape unicode.
     """
     if not symbols:
         return ''
@@ -320,7 +312,7 @@ def _compress_symbols(symbols):
 def _dot_escape(label: str) -> str:
     return label.replace('\\', '\\\\').replace('"', '\\"')
 
-
+# genera el archvio .dot
 def dfa_to_dot(dfa):
     dfa = normalize_dfa(dfa)
     lines = [

@@ -1,7 +1,7 @@
 """Cálculo robusto de FIRST y FOLLOW para gramáticas libres de contexto."""
 from .models import EPSILON, ENDMARK
 
-
+# calcula el first de una secuancia 
 def first_of_sequence(sequence, first, terminals):
     if not sequence:
         return {EPSILON}
@@ -17,7 +17,7 @@ def first_of_sequence(sequence, first, terminals):
     result.add(EPSILON)
     return result
 
-
+# calcula first para todos los no terminales de la gramatica
 def first_sets(grammar):
     first = {nt: set() for nt in grammar.non_terminals}
     changed = True
@@ -31,7 +31,7 @@ def first_sets(grammar):
                     changed = True
     return first
 
-
+# calcula el follow para todos los no terminales de la gramatica
 def follow_sets(grammar, first):
     follow = {nt: set() for nt in grammar.non_terminals}
     follow[grammar.start_symbol].add(ENDMARK)

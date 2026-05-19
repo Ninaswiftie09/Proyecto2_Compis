@@ -6,34 +6,24 @@ from collections import defaultdict, deque
 EPS = 'ε'
 CONCAT = '·'
 
-_OPERATORS = {'|', CONCAT, '*', '+', '?', '(', ')'}
-_POSTFIX_OPS = {'|', CONCAT, '*', '+', '?'}
+_OPERATORS = {'|', CONCAT, '*', '+', '?', '(', ')'} # operadores posibles de regex
+_POSTFIX_OPS = {'|', CONCAT, '*', '+', '?'} # operadores en posfix
 
-
+# convierte un caracter normal a un literal interno 
 def _literal(ch: str):
     return ('lit', ch)
 
-
+# verifica si un token es un literal interno
 def _is_literal(tok) -> bool:
     return isinstance(tok, tuple) and len(tok) == 2 and tok[0] == 'lit'
 
-
+# convierte escapes en caractereas reales (tabs, espacio, saltos)
 def _escape_value(ch: str) -> str:
     values = {'n': '\n', 't': '\t', 'r': '\r', 's': ' '}
     return values.get(ch, ch)
 
-
+# lee literales entre comillas simples
 def _read_quoted_literal(pattern: str, start: int):
-    """Lee un literal entre comillas simples.
-
-    Ejemplos válidos:
-      '+'      -> ['+']
-      '\\n'    -> ['\n']
-      'abc'    -> ['a', 'b', 'c']
-
-    Devuelve una lista de caracteres y el índice justo después de la comilla
-    de cierre. No usa expresiones regulares.
-    """
     if start >= len(pattern) or pattern[start] != "'":
         raise ValueError('Se esperaba una comilla simple al leer literal YALex.')
 
@@ -56,7 +46,7 @@ def _read_quoted_literal(pattern: str, start: int):
 
     raise ValueError('Literal entre comillas simples sin cerrar en expresión regular.')
 
-
+# Detecta si una clase de caracteres usa comillas simples adentro
 def _class_contains_quoted_items(pattern: str, start: int) -> bool:
     """Indica si una clase [...] contiene elementos entre comillas simples."""
     i = start + 1
@@ -71,15 +61,9 @@ def _class_contains_quoted_items(pattern: str, start: int) -> bool:
         i += 1
     return False
 
-
+# lee un elemento dentro de una clase y devuelve una lista de caracteres y el indice siguiente
 def _read_class_atom(pattern: str, i: int):
     """Lee un elemento dentro de una clase de caracteres.
-
-    Puede leer:
-      a
-      \\n
-      '\\n'
-      '0'
     """
     if i >= len(pattern):
         raise ValueError('Clase de caracteres sin cerrar en expresión regular.')
@@ -94,7 +78,7 @@ def _read_class_atom(pattern: str, i: int):
 
     return [pattern[i]], i + 1
 
-
+# Convierte una clase de caracteres en una expresión equivalente con uniones
 def _expand_class(pattern: str, start: int):
     """Lee una clase [..] y devuelve tokens equivalentes a (a|b|c).
 
@@ -148,7 +132,7 @@ def _expand_class(pattern: str, start: int):
 
     raise ValueError('Clase de caracteres sin cerrar en expresión regular.')
 
-
+# convierte la expresión regular en una lista de tokens (literales, operadores, paréntesis)
 def tokenize_regex(pattern: str):
     tokens = []
     i = 0
@@ -179,15 +163,16 @@ def tokenize_regex(pattern: str):
         raise ValueError('Expresión regular vacía.')
     return tokens
 
-
+# dice si un token puede terminar un atomo de regex y devuelve true si es asi
 def _can_end_atom(tok) -> bool:
     return _is_literal(tok) or tok == ')' or tok in {'*', '+', '?'}
+# sirve para saber si hay que insertar una concatenacion 
 
-
+# dice si un token puede iniciar un atomo de regex y devuelve true si es asi
 def _can_start_atom(tok) -> bool:
     return _is_literal(tok) or tok == '('
 
-
+# agrega concatenación explicita 
 def add_concat(tokens):
     out = []
     for i, tok in enumerate(tokens):
@@ -198,7 +183,7 @@ def add_concat(tokens):
                 out.append(CONCAT)
     return out
 
-
+#  convierte la regex a postfix
 def to_postfix(tokens):
     precedence = {'|': 1, CONCAT: 2, '?': 3, '*': 3, '+': 3}
     out, stack = [], []
@@ -225,7 +210,7 @@ def to_postfix(tokens):
         out.append(stack.pop())
     return out
 
-
+# construye un AFN  usando thomson y devuelve el estado inicial, el estado de aceptación y la tabla de transiciones
 def thompson(postfix):
     next_state = 0
     trans = defaultdict(lambda: defaultdict(set))
@@ -289,7 +274,7 @@ def thompson(postfix):
         raise ValueError('Expresión regular inválida o incompleta.')
     return stack[-1], trans
 
-
+# recolecta todos los espados que aparecen en el AFN
 def all_states(trans, start=None, end=None):
     states = set()
     if start is not None:
@@ -302,7 +287,7 @@ def all_states(trans, start=None, end=None):
             states.update(dests)
     return states
 
-
+# calcula la cerradura de epsilon
 def epsilon_closure(states, trans):
     q, seen = deque(states), set(states)
     while q:
