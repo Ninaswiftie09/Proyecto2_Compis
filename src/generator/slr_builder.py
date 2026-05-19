@@ -3,7 +3,7 @@ from copy import deepcopy
 from .grammar_tools import first_sets, follow_sets
 from .models import ENDMARK, Item
 
-
+# odena los items para que la salida sea consistente y legible
 def _sorted_items(items):
     return sorted(items, key=lambda it: (it.lhs, it.rhs, it.dot))
 
@@ -130,7 +130,7 @@ def parse_tokens(tokens, action, go):
                 f'Error sintáctico en token {current_token!r} con lexema {lexeme!r}. '
                 f'Estado {state}. Se esperaba: {expected}.'
             )
-
+         # shift
         if act[0] == 's':
             next_state = act[1]
             trace.append({
@@ -140,6 +140,7 @@ def parse_tokens(tokens, action, go):
             })
             stack.append(next_state)
             index += 1
+        # reduce
         elif act[0] == 'r':
             lhs, rhs = act[1]
             rhs_len = len(rhs)
@@ -156,6 +157,8 @@ def parse_tokens(tokens, action, go):
             if goto_state is None:
                 return trace, f'Error interno del parser: no existe GOTO[{stack[-1]}][{lhs}].'
             stack.append(goto_state)
+        
+        # accept 
         elif act[0] == 'acc':
             trace.append({
                 'stack': _format_stack(stack),

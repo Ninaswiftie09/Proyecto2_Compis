@@ -1,15 +1,18 @@
-"""Construcción y simulación de AFD para tokenización."""
+"""Construcción y simulación de AFD para tokenización.
+Construye el AFD y tokeniza la entrada """
 from collections import defaultdict, deque
 from .models import normalize_dfa
 from .regex_engine import EPS, add_concat, all_states, epsilon_closure, thompson, to_postfix, tokenize_regex
 
-
+# copia las transiciones de un AFN, pero sumandoleun offset a los estados
+# para wue no se repitan los ids de los estados
 def _copy_nfa_with_offset(target, source, offset):
     for src, row in source.items():
         for symbol, dests in row.items():
             for dest in dests:
                 target[src + offset][symbol].add(dest + offset)
 
+# devuelve una clave para comparar estados deaceptación durante la minimización
 def _accept_key(info):
     if not info:
         return None
@@ -25,6 +28,7 @@ def _minimize_dfa(dfa_trans, dfa_accept, start, alphabet):
     for row in dfa_trans.values():
         states.update(row.values())
 
+    # agrupa estados por su comportamiento de aceptación (token, prioridad, ignore)
     groups = defaultdict(set)
     for state in states:
         groups[_accept_key(dfa_accept.get(state))].add(state)
@@ -90,18 +94,26 @@ def build_dfa(spec):
     Se usa máximo avance. Si dos reglas aceptan el mismo lexema, gana la regla
     que apareció primero en el archivo .yal.
     """
+
+    # crea un AFN combinado para todas las reglas, con un nuevo estado
     nfa_trans = defaultdict(lambda: defaultdict(set))
     combined_start = 0
     next_state = 1
     accept_info = {}
 
+    # recorre cada regla lexica 
     for priority, rule in enumerate(spec.rules):
+
+        # convierte regexa AFN
         regex_tokens = add_concat(tokenize_regex(rule.regex))
         (start, end), trans = thompson(to_postfix(regex_tokens))
         states = all_states(trans, start, end)
         offset = next_state
+
+        # copia el AFN al AFN combinado con un offset para evitar colisiones de estados
         _copy_nfa_with_offset(nfa_trans, trans, offset)
         nfa_trans[combined_start][EPS].add(start + offset)
+        # guarda info de aceptación, la prioridad es por como llegaron
         accept_info[end + offset] = {
             'priority': priority,
             'token':    rule.token,
@@ -109,6 +121,7 @@ def build_dfa(spec):
         }
         next_state += max(states) + 1
 
+    # obtiene alfabeto de símbolos del AFN combinado
     alphabet = sorted(
         symbol
         for row in nfa_trans.values()
@@ -116,6 +129,7 @@ def build_dfa(spec):
         if symbol != EPS
     )
 
+    # construye por subconjuntos
     start_set = epsilon_closure({combined_start}, nfa_trans)
     dfa_states = [start_set]
     dfa_map = {start_set: 0}
@@ -146,12 +160,15 @@ def build_dfa(spec):
 
     dfa_accept = {}
     for dfa_id, nfa_set in enumerate(dfa_states):
+        # marca estados de aceptación del AFD
         candidates = [accept_info[state] for state in nfa_set if state in accept_info]
         if candidates:
             dfa_accept[dfa_id] = min(candidates, key=lambda item: item['priority'])
 
+    # mininiza el AFD
     dfa_trans, dfa_accept = _minimize_dfa(dfa_trans, dfa_accept, 0, alphabet)
 
+    # devuelve el AFD
     return {
         'start':        0,
         'trans':        dfa_trans,
@@ -159,7 +176,7 @@ def build_dfa(spec):
         'ignore_tokens': sorted({rule.token for rule in spec.rules if rule.ignore}),
     }
 
-# marca tokens como ignorados y no se mandan al parser
+# marca tokens como ignorados y no se mandan al parser (de ambos archivos)
 def apply_ignore_tokens(dfa, ignore_tokens):
     """Marca como ignorados los tokens declarados con IGNORE en YAPar."""
     dfa = normalize_dfa(dfa)
@@ -171,6 +188,7 @@ def apply_ignore_tokens(dfa, ignore_tokens):
     return dfa
 
 
+# calcula liena y columna reccoriendo desde el inicio del textp hascia el indice (casi no se usa por tokenize)
 def _position_from_index(text: str, index: int):
     """Calcula (línea, columna) para un índice en el texto.
     Pre-construye la tabla una sola vez para ser O(n) total."""
@@ -185,7 +203,7 @@ def _position_from_index(text: str, index: int):
             col += 1
     return line, col
 
-
+# crea una lista de indices donde empieza cada linea 
 def _build_line_offsets(text: str):
     """Devuelve lista de offsets de inicio de cada línea (índice 0 = línea 1)."""
     offsets = [0]
@@ -194,7 +212,7 @@ def _build_line_offsets(text: str):
             offsets.append(i + 1)
     return offsets
 
-
+# Convierte un índice del texto en línea y columna usando búsqueda binaria
 def _offset_to_line_col(offsets, index):
     """Búsqueda binaria sobre offsets para obtener (línea, columna) en O(log n)."""
     lo, hi = 0, len(offsets) - 1

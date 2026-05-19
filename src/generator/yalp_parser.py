@@ -25,14 +25,17 @@ def _is_token_name(symbol: str) -> bool:
 
 def parse_yalp(path: str) -> Grammar:
     txt = _strip_comments(open(path, 'r', encoding='utf-8').read())
+    # verifica que exista %% para separar tokens y producciones
     if '%%' not in txt:
         raise ValueError('El archivo .yalp debe contener %% para separar tokens y producciones.')
+    # separa las secciones de tokens y producciones usando el primer %% como separador
     token_section, production_section = txt.split('%%', 1)
 
     terminals = set()
     ignore = set()
     warnings = []
 
+    # procesa los tokens y los tokens a ignorar, validando que tengan formato correcto y guardando advertencias sobre mayúsculas o tokens ignorados no declarados
     for line_no, raw in enumerate(token_section.splitlines(), start=1):
         line = raw.strip()
         if not line:
@@ -55,9 +58,11 @@ def parse_yalp(path: str) -> Grammar:
         else:
             raise ValueError(f'Línea {line_no}: contenido inválido en sección de tokens: {line}')
 
+    #  valida que existan terminales 
     if not terminals:
         raise ValueError('La primera sección del .yalp debe declarar tokens con %token.')
 
+    # procesa las producciones, detecta el símbolo de inicio y valida que los símbolos usados estén declarados
     productions = {}
     start = None
     absolute_line_offset = len(token_section.splitlines()) + 1
@@ -73,11 +78,13 @@ def parse_yalp(path: str) -> Grammar:
             raise ValueError('Producción sin nombre en el lado izquierdo.')
         if _is_token_name(lhs):
             warnings.append(f'El lado izquierdo {lhs} parece token; los no terminales deberían escribirse en minúscula.')
+        #detecta el simbolo incial
         if start is None:
             start = lhs
         alternatives = []
         for alt in rhs_blob.split('|'):
             seq = [x for x in alt.strip().split() if x]
+            # maneja epsilon
             if not seq or seq == [EPSILON] or seq == ['epsilon']:
                 alternatives.append([])
             else:
@@ -90,12 +97,14 @@ def parse_yalp(path: str) -> Grammar:
     if not productions or start is None:
         raise ValueError('No se encontraron producciones válidas en el archivo .yalp')
 
+    # valida simbolos usados
     non_terminals = set(productions.keys())
     for lhs, alts in productions.items():
         for rhs in alts:
             for sym in rhs:
                 if sym in terminals or sym in non_terminals:
                     continue
+                # si parece token pero no es
                 if _is_token_name(sym):
                     raise ValueError(f'El token {sym} se usa en producciones pero no fue declarado con %token.')
                 raise ValueError(f'El no terminal {sym} se usa en producciones pero no tiene producción propia.')
