@@ -1,3 +1,7 @@
-x = 1 + 2 * 3;
-print(x + 4);
-y = (x + 5) * 2;
+a = 10;
+b = 20;
+c = a + b * 3;
+d = (a + b) * (c + 5);
+print(d);
+e = d + c * (a + b + 2);
+print(e + d * c);

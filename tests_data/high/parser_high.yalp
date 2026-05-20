@@ -1,10 +1,23 @@
-/* Caso de complejidad alta: secuencia de asignaciones e impresión */
 %token PRINT ID NUM EQ PLUS MUL LPAREN RPAREN SEMI WS
 IGNORE WS
 %%
 program: stmt_list ;
+
 stmt_list: stmt_list stmt | stmt ;
-stmt: ID EQ expr SEMI | PRINT LPAREN expr RPAREN SEMI ;
-expr: expr PLUS term | term ;
-term: term MUL factor | factor ;
-factor: LPAREN expr RPAREN | NUM | ID ;
+
+stmt: ID EQ expr SEMI
+    | PRINT LPAREN expr RPAREN SEMI
+    ;
+
+expr: expr PLUS term
+    | term
+    ;
+
+term: term MUL factor
+    | factor
+    ;
+
+factor: LPAREN expr RPAREN
+      | NUM
+      | ID
+      ;

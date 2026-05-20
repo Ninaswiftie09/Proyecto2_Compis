@@ -1,5 +1,5 @@
 TOKEN PRINT print
-TOKEN ID [a-zA-Z][a-zA-Z0-9_]*
+TOKEN ID [a-zA-Z][a-zA-Z0-9]*
 TOKEN NUM [0-9]+
 TOKEN EQ =
 TOKEN PLUS \+
